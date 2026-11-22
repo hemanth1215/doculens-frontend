@@ -1,0 +1,54 @@
+<section class="card new-conversation" aria-labelledby="new-conversation-title">
+  <h2 id="new-conversation-title" class="card__title">New conversation</h2>
+  <p class="muted">Answers will use only the documents you choose here.</p>
+
+  @if (loading()) {
+    <dl-loading label="Loading your ready documents…" />
+  } @else if (loadError(); as message) {
+    <dl-error-alert [message]="message" retryLabel="Try again" (retry)="load()" />
+  } @else if (documents().length === 0) {
+    <div class="empty-state">
+      <p class="empty-state__title">No ready documents</p>
+      <p>Upload a PDF and wait until it is ready, then start a conversation.</p>
+      <a class="btn btn--primary" routerLink="/documents">Go to Documents</a>
+    </div>
+  } @else {
+    <form (ngSubmit)="create()">
+      <fieldset class="doc-picker">
+        <legend>Documents ({{ selected().size }} selected, up to {{ max }})</legend>
+        @for (document of documents(); track document.id) {
+          <label class="doc-picker__item">
+            <input
+              #checkbox
+              type="checkbox"
+              [checked]="selected().has(document.id)"
+              (change)="toggle(document.id, checkbox.checked)"
+            />
+            <span class="break-words">{{ document.filename }}</span>
+          </label>
+        }
+      </fieldset>
+      @if (tooMany()) {
+        <p class="field__error" role="alert">Choose at most {{ max }} documents.</p>
+      }
+
+      <div class="field">
+        <label for="conversation-title">Title (optional)</label>
+        <input
+          id="conversation-title"
+          name="title"
+          type="text"
+          maxlength="200"
+          [(ngModel)]="title"
+        />
+      </div>
+
+      @if (createError(); as message) {
+        <dl-error-alert [message]="message" />
+      }
+      <button type="submit" class="btn btn--primary" [disabled]="!canCreate()">
+        {{ creating() ? 'Creating…' : 'Start conversation' }}
+      </button>
+    </form>
+  }
+</section>

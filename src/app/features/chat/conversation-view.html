@@ -1,0 +1,147 @@
+@if (loading()) {
+  <dl-loading label="Loading conversation…" />
+} @else if (loadError(); as message) {
+  <dl-error-alert [message]="message" retryLabel="Try again" (retry)="load(conversationId())" />
+} @else if (conversation(); as conv) {
+  <div class="conversation">
+    <header class="conversation__header">
+      @if (renaming()) {
+        <form class="rename" (submit)="$event.preventDefault(); saveRename()">
+          <label class="visually-hidden" for="rename-input">Conversation title</label>
+          <input id="rename-input" type="text" maxlength="200" [formControl]="renameControl" />
+          <button type="submit" class="btn btn--primary btn--small">Save</button>
+          <button type="button" class="btn btn--ghost btn--small" (click)="renaming.set(false)">
+            Cancel
+          </button>
+        </form>
+      } @else {
+        <h1 class="conversation__title break-words">{{ conv.title }}</h1>
+        <div class="conversation__actions">
+          <button type="button" class="btn btn--ghost btn--small" (click)="startRename()">
+            Rename
+          </button>
+          <button
+            type="button"
+            class="btn btn--ghost btn--small"
+            (click)="confirmingDelete.set(true)"
+          >
+            Delete
+          </button>
+        </div>
+      }
+      <ul class="scope" aria-label="Documents in this conversation">
+        @for (document of conv.documents; track document.id) {
+          <li class="scope__item">
+            <a [routerLink]="['/documents', document.id]" class="break-words">{{
+              document.filename
+            }}</a>
+            @if (document.status !== 'READY') {
+              <dl-status-badge [status]="document.status" />
+            }
+          </li>
+        } @empty {
+          <li class="muted">All documents of this conversation were deleted.</li>
+        }
+      </ul>
+      @if (actionError(); as message) {
+        <dl-error-alert [message]="message" />
+      }
+    </header>
+
+    <div #messageList class="messages" [attr.aria-busy]="streaming()" aria-label="Messages">
+      @for (message of messages(); track message.id) {
+        @if (message.role === 'USER') {
+          <article class="message message--user" aria-label="Your question">
+            <p class="message__text">{{ message.content }}</p>
+          </article>
+        } @else {
+          <article class="message message--assistant" aria-label="DocuLens answer">
+            @if (message.status === 'STREAMING' && message.content === '') {
+              <p class="message__text muted">Searching your documents…</p>
+            } @else {
+              <p class="message__text">{{ message.content }}</p>
+            }
+            @if (message.grounded === false) {
+              <p class="message__note">Not found in the selected documents.</p>
+            }
+            @if (message.status === 'FAILED') {
+              <div class="message__problem" role="alert">
+                <span>{{ message.errorMessage ?? 'The answer could not be completed.' }}</span>
+                <button
+                  type="button"
+                  class="btn btn--secondary btn--small"
+                  [disabled]="streaming()"
+                  (click)="retry(message)"
+                >
+                  Try again
+                </button>
+              </div>
+            }
+            @if (message.status === 'INTERRUPTED') {
+              <div class="message__problem">
+                <span>Answer stopped before it finished.</span>
+                <button
+                  type="button"
+                  class="btn btn--secondary btn--small"
+                  [disabled]="streaming()"
+                  (click)="retry(message)"
+                >
+                  Ask again
+                </button>
+              </div>
+            }
+            <dl-citation-list [citations]="message.citations" />
+            <p class="message__time muted">{{ message.createdAt | date: 'short' }}</p>
+          </article>
+        }
+      } @empty {
+        <div class="empty-state">
+          <p class="empty-state__title">Ask your first question</p>
+          <p>Answers come only from this conversation's documents, with page citations.</p>
+        </div>
+      }
+    </div>
+
+    <p class="visually-hidden" role="status" aria-live="polite">{{ announcement() }}</p>
+
+    @if (askError(); as message) {
+      <dl-error-alert [message]="message" />
+    }
+    @if (unavailableDocuments() > 0) {
+      <p class="alert alert--warning">
+        Some documents in this conversation are not ready and are left out of answers.
+      </p>
+    }
+
+    <form class="composer" (submit)="$event.preventDefault(); ask()">
+      <label for="question-input" class="visually-hidden">Your question</label>
+      <textarea
+        id="question-input"
+        rows="3"
+        [formControl]="question"
+        [attr.maxlength]="maxLength"
+        placeholder="Ask about your documents…  (Enter to send, Shift+Enter for a new line)"
+        (keydown)="onComposerKeydown($event)"
+        aria-describedby="question-count"
+      ></textarea>
+      <div class="composer__bar">
+        <span id="question-count" class="muted">{{ questionLength() }} / {{ maxLength }}</span>
+        @if (streaming()) {
+          <button type="button" class="btn btn--secondary" (click)="stop()">Stop</button>
+        } @else {
+          <button type="submit" class="btn btn--primary" [disabled]="question.invalid">Ask</button>
+        }
+      </div>
+    </form>
+  </div>
+
+  <dl-confirm-dialog
+    [open]="confirmingDelete()"
+    title="Delete conversation?"
+    [message]="'“' + conv.title + '” and all its messages will be permanently deleted.'"
+    confirmLabel="Delete"
+    [danger]="true"
+    (confirmed)="confirmDelete()"
+    (cancelled)="confirmingDelete.set(false)"
+  />
+}

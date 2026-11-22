@@ -1,0 +1,165 @@
+<div class="page">
+  <header class="page__header">
+    <h1>Documents</h1>
+    <p class="page__lead">Upload PDFs, then ask questions about them in Chat.</p>
+  </header>
+
+  <section class="card upload" aria-labelledby="upload-title">
+    <h2 id="upload-title" class="card__title">Upload a PDF</h2>
+    <div
+      class="dropzone"
+      [class.dropzone--active]="dragging()"
+      (dragover)="onDragOver($event)"
+      (dragleave)="dragging.set(false)"
+      (drop)="onDrop($event)"
+    >
+      <p>Drag a PDF here, or</p>
+      <label class="btn btn--primary" for="pdf-input">Choose a file</label>
+      <input
+        id="pdf-input"
+        class="visually-hidden"
+        type="file"
+        accept="application/pdf,.pdf"
+        [disabled]="upload() !== null"
+        (change)="onFileSelected($event)"
+        aria-describedby="upload-hint"
+      />
+      <p id="upload-hint" class="field__hint">
+        PDF only, up to {{ maxSize | fileSize }} and 1,000 pages. Scanned (image-only) PDFs cannot
+        be read: OCR is not supported.
+      </p>
+    </div>
+
+    @if (upload(); as state) {
+      <div class="upload__progress">
+        <p>Uploading “{{ state.fileName }}”…</p>
+        <dl-progress-bar [value]="state.percent" [label]="'Uploading ' + state.fileName" />
+      </div>
+    }
+    @if (uploadProblem(); as problem) {
+      <div class="alert alert--error" role="alert">
+        <p class="alert__message">{{ problem.message }}</p>
+        @if (problem.existingDocumentId) {
+          <a
+            class="btn btn--secondary btn--small"
+            [routerLink]="['/documents', problem.existingDocumentId]"
+          >
+            Open the existing document
+          </a>
+        }
+      </div>
+    }
+    @if (notice(); as message) {
+      <div class="alert alert--success" role="status">{{ message }}</div>
+    }
+  </section>
+
+  <section class="card" aria-labelledby="list-title">
+    <div class="card__header">
+      <h2 id="list-title" class="card__title">Your documents</h2>
+      @if (hasActiveProcessing()) {
+        <span class="muted" role="status">Updating automatically while documents process…</span>
+      }
+    </div>
+
+    @if (actionError(); as message) {
+      <dl-error-alert [message]="message" />
+    }
+
+    @if (loading()) {
+      <dl-loading label="Loading your documents…" />
+    } @else if (loadError(); as message) {
+      <dl-error-alert [message]="message" retryLabel="Try again" (retry)="load(0)" />
+    } @else if (documents().length === 0) {
+      <div class="empty-state">
+        <p class="empty-state__title">No documents yet</p>
+        <p>Upload your first PDF above to start asking questions.</p>
+      </div>
+    } @else {
+      <ul class="doc-list">
+        @for (document of documents(); track document.id) {
+          <li class="doc-row">
+            <div class="doc-row__main">
+              <a class="doc-row__name" [routerLink]="['/documents', document.id]">{{
+                document.filename
+              }}</a>
+              <div class="doc-row__meta">
+                <dl-status-badge [status]="document.status" />
+                <span>{{ document.sizeBytes | fileSize }}</span>
+                @if (document.pageCount !== null) {
+                  <span>{{ document.pageCount }} pages</span>
+                }
+                <span>Uploaded {{ document.createdAt | date: 'mediumDate' }}</span>
+              </div>
+              @if (document.status === 'PROCESSING' || document.status === 'UPLOADED') {
+                <dl-progress-bar
+                  [value]="document.progress.percent"
+                  [label]="'Processing ' + document.filename"
+                />
+              }
+              @if (document.status === 'FAILED' && document.error) {
+                <p class="doc-row__error">{{ document.error.message }}</p>
+              }
+            </div>
+            <div class="doc-row__actions">
+              @if (document.status === 'READY') {
+                <button
+                  type="button"
+                  class="btn btn--secondary btn--small"
+                  (click)="askAbout(document)"
+                >
+                  Ask questions<span class="visually-hidden"> about {{ document.filename }}</span>
+                </button>
+              }
+              <button
+                type="button"
+                class="btn btn--ghost btn--small"
+                (click)="pendingDelete.set(document)"
+              >
+                Delete<span class="visually-hidden"> {{ document.filename }}</span>
+              </button>
+            </div>
+          </li>
+        }
+      </ul>
+
+      @if (pageMeta(); as meta) {
+        @if (meta.totalPages > 1) {
+          <nav class="pager" aria-label="Document pages">
+            <button
+              type="button"
+              class="btn btn--ghost btn--small"
+              [disabled]="meta.page === 0"
+              (click)="load(meta.page - 1)"
+            >
+              Previous
+            </button>
+            <span>Page {{ meta.page + 1 }} of {{ meta.totalPages }}</span>
+            <button
+              type="button"
+              class="btn btn--ghost btn--small"
+              [disabled]="meta.page + 1 >= meta.totalPages"
+              (click)="load(meta.page + 1)"
+            >
+              Next
+            </button>
+          </nav>
+        }
+      }
+    }
+  </section>
+</div>
+
+<dl-confirm-dialog
+  [open]="pendingDelete() !== null"
+  title="Delete document?"
+  [message]="
+    '“' +
+    (pendingDelete()?.filename ?? '') +
+    '” and its search index will be removed. Answers that cited it keep the document name and pages.'
+  "
+  confirmLabel="Delete"
+  [danger]="true"
+  (confirmed)="confirmDelete()"
+  (cancelled)="pendingDelete.set(null)"
+/>

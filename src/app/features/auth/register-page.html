@@ -1,0 +1,70 @@
+<div class="auth-card">
+  <h1 class="auth-card__title">Create your DocuLens account</h1>
+  <p class="auth-card__subtitle">Upload PDFs and get answers with page citations.</p>
+
+  @if (error(); as message) {
+    <dl-error-alert [message]="message" />
+  }
+
+  <form [formGroup]="form" (ngSubmit)="submit()" novalidate>
+    <div class="field">
+      <label for="register-name">Display name</label>
+      <input
+        id="register-name"
+        type="text"
+        formControlName="displayName"
+        autocomplete="name"
+        [attr.aria-invalid]="showError('displayName')"
+        aria-describedby="register-name-error"
+      />
+      @if (showError('displayName')) {
+        <p id="register-name-error" class="field__error">
+          {{ serverFieldErrors().displayName ?? 'Enter a name of up to 100 characters.' }}
+        </p>
+      }
+    </div>
+
+    <div class="field">
+      <label for="register-email">Email</label>
+      <input
+        id="register-email"
+        type="email"
+        formControlName="email"
+        autocomplete="email"
+        [attr.aria-invalid]="showError('email')"
+        aria-describedby="register-email-error"
+      />
+      @if (showError('email')) {
+        <p id="register-email-error" class="field__error">
+          {{ serverFieldErrors().email ?? 'Enter a valid email address.' }}
+        </p>
+      }
+    </div>
+
+    <div class="field">
+      <label for="register-password">Password</label>
+      <input
+        id="register-password"
+        type="password"
+        formControlName="password"
+        autocomplete="new-password"
+        [attr.aria-invalid]="showError('password')"
+        aria-describedby="register-password-hint register-password-error"
+      />
+      <p id="register-password-hint" class="field__hint">
+        At least 12 characters. Avoid common passwords.
+      </p>
+      @if (showError('password')) {
+        <p id="register-password-error" class="field__error">
+          {{ serverFieldErrors().password ?? 'Use 12 to 128 characters.' }}
+        </p>
+      }
+    </div>
+
+    <button type="submit" class="btn btn--primary btn--block" [disabled]="submitting()">
+      {{ submitting() ? 'Creating account…' : 'Create account' }}
+    </button>
+  </form>
+
+  <p class="auth-card__footer">Already have an account? <a routerLink="/login">Sign in</a></p>
+</div>

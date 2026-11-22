@@ -1,0 +1,106 @@
+<div class="page">
+  <p><a routerLink="/documents">← All documents</a></p>
+
+  @if (loading()) {
+    <dl-loading label="Loading document…" />
+  } @else if (loadError(); as message) {
+    <dl-error-alert [message]="message" retryLabel="Try again" (retry)="load(documentId())" />
+  } @else if (document(); as doc) {
+    <header class="page__header">
+      <h1 class="break-words">{{ doc.filename }}</h1>
+      <dl-status-badge [status]="doc.status" />
+    </header>
+
+    @if (actionError(); as message) {
+      <dl-error-alert [message]="message" />
+    }
+
+    <section class="card" aria-labelledby="status-title">
+      <h2 id="status-title" class="card__title">Processing</h2>
+      @switch (doc.status) {
+        @case ('UPLOADED') {
+          <p role="status">Queued for processing. This page updates automatically.</p>
+          <dl-progress-bar [label]="'Waiting to process ' + doc.filename" />
+        }
+        @case ('PROCESSING') {
+          <p role="status">
+            Reading and indexing: {{ doc.progress.pagesProcessed }} of
+            {{ doc.pageCount ?? '?' }} pages.
+          </p>
+          <dl-progress-bar [value]="doc.progress.percent" [label]="'Processing ' + doc.filename" />
+        }
+        @case ('READY') {
+          <p>Ready. {{ doc.progress.chunkCount }} passages are searchable.</p>
+          <button
+            type="button"
+            class="btn btn--primary"
+            [disabled]="busy()"
+            (click)="askQuestions()"
+          >
+            Ask questions about this document
+          </button>
+        }
+        @case ('FAILED') {
+          <div class="alert alert--error" role="alert">
+            <p class="alert__message">
+              {{ doc.error?.message ?? 'The document could not be processed.' }}
+            </p>
+          </div>
+          @if (doc.error?.retryable) {
+            <p class="muted">This looks temporary. Retrying may help.</p>
+          }
+          <button type="button" class="btn btn--secondary" [disabled]="busy()" (click)="retry()">
+            Retry processing
+          </button>
+        }
+      }
+      @if (doc.emptyPageCount > 0) {
+        <p class="alert alert--warning">
+          {{ doc.emptyPageCount }} page(s) have little or no selectable text (probably scanned).
+          Their content cannot be searched because OCR is not supported.
+        </p>
+      }
+    </section>
+
+    <section class="card" aria-labelledby="details-title">
+      <h2 id="details-title" class="card__title">Details</h2>
+      <dl class="details">
+        <dt>Size</dt>
+        <dd>{{ doc.sizeBytes | fileSize }}</dd>
+        <dt>Pages</dt>
+        <dd>{{ doc.pageCount ?? 'Unknown' }}</dd>
+        <dt>Uploaded</dt>
+        <dd>{{ doc.createdAt | date: 'medium' }}</dd>
+        @if (doc.processedAt) {
+          <dt>Processed</dt>
+          <dd>{{ doc.processedAt | date: 'medium' }}</dd>
+        }
+      </dl>
+    </section>
+
+    <section class="card card--danger" aria-labelledby="danger-title">
+      <h2 id="danger-title" class="card__title">Delete</h2>
+      <p>
+        Removes the file and its search index. Existing answers keep the document name and pages.
+      </p>
+      <button
+        type="button"
+        class="btn btn--danger"
+        [disabled]="busy()"
+        (click)="confirmingDelete.set(true)"
+      >
+        Delete document
+      </button>
+    </section>
+
+    <dl-confirm-dialog
+      [open]="confirmingDelete()"
+      title="Delete document?"
+      [message]="'“' + doc.filename + '” will be permanently removed.'"
+      confirmLabel="Delete"
+      [danger]="true"
+      (confirmed)="confirmDelete()"
+      (cancelled)="confirmingDelete.set(false)"
+    />
+  }
+</div>

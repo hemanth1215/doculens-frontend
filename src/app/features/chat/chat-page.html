@@ -1,0 +1,52 @@
+<div class="chat-layout">
+  <aside class="chat-sidebar" aria-labelledby="conversations-title">
+    <div class="chat-sidebar__header">
+      <h2 id="conversations-title" class="card__title">Conversations</h2>
+      <button type="button" class="btn btn--primary btn--small" (click)="startNew()">New</button>
+    </div>
+    @if (loading()) {
+      <dl-loading label="Loading conversations…" />
+    } @else if (loadError(); as message) {
+      <dl-error-alert [message]="message" retryLabel="Try again" (retry)="loadConversations()" />
+    } @else {
+      <ul class="conversation-list">
+        @for (conversation of conversations(); track conversation.id) {
+          <li>
+            <a
+              class="conversation-list__item"
+              [routerLink]="['/chat', conversation.id]"
+              [class.is-active]="conversation.id === conversationId() && !creatingNew()"
+              [attr.aria-current]="
+                conversation.id === conversationId() && !creatingNew() ? 'page' : null
+              "
+              (click)="creatingNew.set(false)"
+            >
+              <span class="conversation-list__title break-words">{{ conversation.title }}</span>
+              <span class="conversation-list__meta muted">
+                {{ conversation.documentCount }} doc{{
+                  conversation.documentCount === 1 ? '' : 's'
+                }}
+                ·
+                {{ conversation.updatedAt | date: 'MMM d, h:mm a' }}
+              </span>
+            </a>
+          </li>
+        } @empty {
+          <li class="muted conversation-list__empty">No conversations yet.</li>
+        }
+      </ul>
+    }
+  </aside>
+
+  <section class="chat-main">
+    @if (showNewForm()) {
+      <dl-new-conversation (created)="onCreated($event)" />
+    } @else if (conversationId(); as id) {
+      <dl-conversation-view
+        [conversationId]="id"
+        (changed)="loadConversations()"
+        (deleted)="onDeleted()"
+      />
+    }
+  </section>
+</div>
