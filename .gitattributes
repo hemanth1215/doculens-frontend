@@ -1,0 +1,5 @@
+# Files used inside Linux containers keep LF line endings on every OS
+Dockerfile text eol=lf
+.dockerignore text eol=lf
+nginx/** text eol=lf
+e2e/** text eol=lf

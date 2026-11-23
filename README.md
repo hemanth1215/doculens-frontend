@@ -34,13 +34,42 @@ npm start            # ng serve on http://localhost:4200
 
 `proxy.conf.json` forwards `/api/*` to `http://localhost:8080`, so the browser only talks to one origin. There is no CORS setup, and the backend address never appears in the frontend code.
 
+On Windows PowerShell, if `npm` is blocked ("running scripts is disabled"), use `npm.cmd`, or run `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned` once.
+
+**Whole app in Docker:** from `../doculens-backend`, run `docker compose --profile app up -d --build` and open http://localhost:8088. See `../shared-spec/DEPLOYMENT.md`.
+
 ## Build and test
 
 ```bash
 npm run build                    # production build into dist/doculens-frontend
 npx ng test --watch=false        # unit and component tests (Vitest)
-npx prettier --check "src/**/*.{ts,html,scss}"
+npm run format:check             # Prettier (src and e2e)
+npm run e2e:stack                # end-to-end test against a running stack (see below)
 ```
+
+## Docker image
+`Dockerfile` builds the production bundle and serves it with unprivileged nginx (`nginx/default.conf.template`).
+- **Routing:** nginx proxies `/api/*` to `DOCULENS_BACKEND_ORIGIN` (default `http://backend:8080`), with response buffering off for streamed answers and request buffering off for large uploads. Other paths fall back to `index.html`.
+- **Headers:** it sends a Content-Security-Policy (`script-src 'self'`) and the other headers in `nginx/security-headers.conf`. That's why the production build turns off Angular's inline critical CSS: it would add an inline script.
+- **Health check:** `GET /healthz`.
+
+## End-to-end test (`e2e/`)
+`npm run e2e:stack` runs `e2e/stack-e2e.mjs` against a running stack, through the same origin the browser uses. It needs only Node, no browser. It checks:
+- security headers and SPA routing
+- sign-up and sign-in rules
+- upload validation and asynchronous ingestion
+- cross-user isolation (404s for another user's documents and conversations)
+- search, streamed answers with citations, history
+- deletion, including the vector purge (checked directly in Qdrant)
+
+| Variable | Default |
+|---|---|
+| `DOCULENS_E2E_BASE_URL` | `http://localhost:8088` |
+| `DOCULENS_E2E_QDRANT_URL` | `http://localhost:6333` (if unreachable, the vector checks are skipped) |
+| `DOCULENS_E2E_QDRANT_COLLECTION` | `doculens_chunks_fake` |
+| `DOCULENS_E2E_LARGE_PAGES` | `0`. Set it to e.g. `1000` to also ingest a large generated PDF. |
+
+The test creates throwaway users (`e2e-…@example.test`) in the target database, so run it against a local or staging stack, never production. `e2e/pdf.mjs` generates the test PDFs.
 
 ## Code layout (`src/app`)
 
