@@ -5,7 +5,7 @@
 The Angular web app for DocuLens. It is an independent application with its own build. It talks to `doculens-backend` only through the HTTP API defined in `../shared-spec/API_CONTRACT.yaml`.
 
 ## Features
-- **Sign in / create account.** The access token is kept in memory only (see *Security*).
+- **Sign in / create account.** You stay signed in across page reloads and on several devices at once. **Sign out** ends this session; **Sign out everywhere** ends all of them (see *Security*).
 - **Documents:**
   - Upload PDFs (drag and drop or file picker) with instant checks and an upload progress bar.
   - A document list with live processing status that refreshes automatically while documents process.
@@ -57,10 +57,12 @@ npm run e2e:stack                # end-to-end test against a running stack (see 
 `npm run e2e:stack` runs `e2e/stack-e2e.mjs` against a running stack, through the same origin the browser uses. It needs only Node, no browser. It checks:
 - security headers and SPA routing
 - sign-up and sign-in rules
+- sessions: refresh cookie attributes, rotation, conflict on replay, logout, logout everywhere
 - upload validation and asynchronous ingestion
 - cross-user isolation (404s for another user's documents and conversations)
 - search, streamed answers with citations, history
 - deletion, including the vector purge (checked directly in Qdrant)
+- rate limiting through the proxy (last: it uses up the login-per-IP budget for 5 minutes)
 
 | Variable | Default |
 |---|---|
@@ -68,15 +70,16 @@ npm run e2e:stack                # end-to-end test against a running stack (see 
 | `DOCULENS_E2E_QDRANT_URL` | `http://localhost:6333` (if unreachable, the vector checks are skipped) |
 | `DOCULENS_E2E_QDRANT_COLLECTION` | `doculens_chunks_fake` |
 | `DOCULENS_E2E_LARGE_PAGES` | `0`. Set it to e.g. `1000` to also ingest a large generated PDF. |
+| `DOCULENS_E2E_SKIP_RATE_LIMIT` | `false`. `true` skips the rate-limit section, e.g. for repeated runs. |
 
-The test creates throwaway users (`e2e-…@example.test`) in the target database, so run it against a local or staging stack, never production. `e2e/pdf.mjs` generates the test PDFs.
+The test creates throwaway users (`e2e-…@example.test`) in the target database, so run it against a local or staging stack, never production. Back-to-back runs can hit the rate limits; see `../shared-spec/DEPLOYMENT.md` §6a. `e2e/pdf.mjs` generates the test PDFs.
 
 ## Code layout (`src/app`)
 
 | Folder | Contents |
 |---|---|
 | `core/api` | `API_BASE_URL` and limits (`api-config.ts`), contract types (`api-models.ts`), `ApiError` (problem responses mapped to friendly messages), `DocumentsApi`, `ConversationsApi` |
-| `core/auth` | `AuthService` (in-memory session, expiry), `authInterceptor` (bearer token for API calls only), `unauthorizedInterceptor` (401 ends the session), `authGuard` and `guestGuard` |
+| `core/auth` | `AuthService` (in-memory access token, session restore, single-flight refresh, logout and logout everywhere), `authInterceptor` (bearer token for API calls only, refresh and one retry on 401), `authGuard` and `guestGuard` |
 | `core/chat` | `ChatStreamService` (POST + `fetch` streaming), `SseParser` |
 | `layout` | `Shell`: header, navigation, user menu, skip link |
 | `features/auth` | Sign-in and registration pages |
@@ -85,12 +88,14 @@ The test creates throwaway users (`e2e-…@example.test`) in the target database
 | `shared` | Status badge, progress bar, error alert, loading indicator, confirm dialog, citation list, formatting pipes |
 
 ## Security
-- **The token is kept in memory only**, never in `localStorage` or script-readable cookies. A page reload or the 15-minute token expiry signs you out; the backend has no refresh endpoint yet (planned with authentication completion).
-- **The token goes only to DocuLens API URLs** (`/api/v1/...`), never to other origins.
-- **A 401 ends the session** and returns to sign-in, with a safe same-app return URL.
+- **The access token is kept in memory only**, never in `localStorage` or script-readable cookies.
+- **The refresh token is an HttpOnly cookie** (`SameSite=Strict`, path `/api/v1/auth`). JavaScript never sees it; the browser sends it only to refresh and logout.
+- **Silent refresh (ADR-048):** at start-up the app calls `/auth/refresh` once, so a reload keeps you signed in. An expired access token is refreshed on demand, before a request or after a 401 (retried once). Concurrent requests share one refresh, and tabs take turns through the Web Locks API; a `409 REFRESH_CONFLICT` (another tab just refreshed) is retried once.
+- **A failed refresh (401/403) ends the session** and returns to sign-in, with a safe same-app return URL. Temporary failures (network, 429, 5xx) keep you signed in.
+- **The token goes only to DocuLens API URLs** (`/api/v1/...`), never to other origins, and never to the public auth endpoints.
 - **Route guards are only for usability.** The backend authorizes every request.
 - **Document text is rendered only through Angular text interpolation**, never as HTML. That covers answers, snippets and filenames.
-- **No secrets, keys or backend hosts are in the frontend.** Hosting should add a Content-Security-Policy header (ARCHITECTURE §3.3).
+- **No secrets, keys or backend hosts are in the frontend.** The nginx image sends a Content-Security-Policy (ARCHITECTURE §3.3).
 
 ## Streaming
 Answers use `POST /api/v1/conversations/{id}/messages` with `Accept: text/event-stream`, read with `fetch` and a stream reader. `EventSource` isn't used because it can't send a request body or an `Authorization` header.

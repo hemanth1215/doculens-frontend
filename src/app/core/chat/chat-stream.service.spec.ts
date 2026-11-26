@@ -18,12 +18,18 @@ function sseResponse(chunks: string[]): Response {
 }
 
 describe('ChatStreamService', () => {
-  const auth = { accessToken: vi.fn(() => 'token-123'), sessionExpired: vi.fn() };
+  const auth = {
+    validAccessToken: vi.fn(() => Promise.resolve<string | null>('token-123')),
+    refreshAccessToken: vi.fn(() => Promise.resolve('token-fresh')),
+    isAuthenticated: vi.fn(() => true),
+    sessionExpired: vi.fn(),
+  };
   let service: ChatStreamService;
   let fetchMock: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
     auth.sessionExpired.mockReset();
+    auth.refreshAccessToken.mockClear();
     fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
     TestBed.configureTestingModule({ providers: [{ provide: AuthService, useValue: auth }] });
@@ -81,20 +87,45 @@ describe('ChatStreamService', () => {
     expect((error as ApiError).message).toBe('Still answering.');
   });
 
-  it('ends the session on 401', async () => {
-    fetchMock.mockResolvedValue(
-      new Response(JSON.stringify({ code: 'UNAUTHORIZED' }), { status: 401 }),
+  it('refreshes the token and retries once on 401', async () => {
+    fetchMock
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ code: 'UNAUTHORIZED' }), { status: 401 }),
+      )
+      .mockResolvedValueOnce(
+        sseResponse(['event:done\ndata:{"assistantMessageId":"a1","status":"COMPLETE"}\n\n']),
+      );
+
+    const events = await collect(service, 'c1', 'q');
+
+    expect(events.map((e) => e.event)).toEqual(['done']);
+    expect(auth.refreshAccessToken).toHaveBeenCalledTimes(1);
+    const retry = fetchMock.mock.calls[1] as [string, RequestInit];
+    expect((retry[1].headers as Record<string, string>)['Authorization']).toBe(
+      'Bearer token-fresh',
     );
+    expect(auth.sessionExpired).not.toHaveBeenCalled();
+  });
+
+  it('ends the session when the retry is rejected too', async () => {
+    fetchMock
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ code: 'UNAUTHORIZED' }), { status: 401 }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ code: 'UNAUTHORIZED' }), { status: 401 }),
+      );
 
     await collect(service, 'c1', 'q').catch(() => undefined);
 
     expect(auth.sessionExpired).toHaveBeenCalled();
   });
 
-  it('aborts the request when the subscriber unsubscribes', () => {
+  it('aborts the request when the subscriber unsubscribes', async () => {
     fetchMock.mockReturnValue(new Promise(() => undefined));
 
     const subscription = service.ask('c1', 'q').subscribe();
+    await new Promise((resolve) => setTimeout(resolve, 0)); // the token is resolved before fetch starts
     const signal = (fetchMock.mock.calls[0] as [string, RequestInit])[1].signal as AbortSignal;
     subscription.unsubscribe();
 

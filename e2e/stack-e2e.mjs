@@ -76,6 +76,12 @@ async function register(label) {
   return { email, password, token: login.body?.accessToken, id: login.body?.user?.id };
 }
 
+/** The `name=value` pair of the refresh cookie a response set, for sending back in a Cookie header. */
+function cookieOf(response) {
+  const setCookie = response.headers.getSetCookie().find((c) => c.startsWith('doculens_rt='));
+  return setCookie ? setCookie.split(';')[0] : '';
+}
+
 async function waitForStatus(token, id, wanted, timeoutMs) {
   const deadline = Date.now() + timeoutMs;
   let doc;
@@ -237,6 +243,73 @@ const bob = await register('bob');
   );
   const forged = await call('GET', '/documents', { token: `${alice.token.slice(0, -4)}AAAA` });
   check('tampered token -> 401', forged.status === 401);
+}
+
+section('2b. Sessions: refresh cookie, rotation, logout (through the proxy)');
+{
+  const login = await call('POST', '/auth/login', {
+    json: { email: alice.email, password: alice.password },
+  });
+  const setCookie = login.headers.getSetCookie().find((c) => c.startsWith('doculens_rt=')) ?? '';
+  check(
+    'login sets the refresh cookie HttpOnly, Secure, SameSite=Strict, Path=/api/v1/auth',
+    ['HttpOnly', 'Secure', 'SameSite=Strict', 'Path=/api/v1/auth'].every((a) =>
+      setCookie.includes(a),
+    ),
+    setCookie.replace(/=[^;]+/, '=<redacted>'),
+  );
+  check(
+    'the refresh token is not in the JSON body',
+    !JSON.stringify(login.body).includes('doculens_rt'),
+  );
+  const cookie1 = cookieOf(login);
+  const noHeader = await call('POST', '/auth/refresh', { headers: { Cookie: cookie1 } });
+  check('refresh without X-DocuLens-Client -> 403', noHeader.status === 403);
+  const refreshed = await call('POST', '/auth/refresh', {
+    headers: { Cookie: cookie1, 'X-DocuLens-Client': 'web' },
+  });
+  const cookie2 = cookieOf(refreshed);
+  check(
+    'refresh -> 200 with a new access token and a rotated cookie',
+    refreshed.status === 200 && !!refreshed.body?.accessToken && !!cookie2 && cookie2 !== cookie1,
+  );
+  const meAfter = await call('GET', '/me', { token: refreshed.body?.accessToken });
+  check('the refreshed access token works', meAfter.status === 200);
+  const replay = await call('POST', '/auth/refresh', {
+    headers: { Cookie: cookie1, 'X-DocuLens-Client': 'web' },
+  });
+  check(
+    'replaying the old cookie right away -> 409 REFRESH_CONFLICT (concurrent tab, not theft)',
+    replay.status === 409 && replay.body?.code === 'REFRESH_CONFLICT',
+  );
+  const logout = await call('POST', '/auth/logout', {
+    headers: { Cookie: cookie2, 'X-DocuLens-Client': 'web' },
+  });
+  check(
+    'logout -> 204 and clears the cookie',
+    logout.status === 204 && logout.headers.getSetCookie().some((c) => c.includes('Max-Age=0')),
+  );
+  const loggedOut = await call('GET', '/me', { token: refreshed.body?.accessToken });
+  check('the logged-out session access token is rejected at once', loggedOut.status === 401);
+  const otherSession = await call('GET', '/me', { token: alice.token });
+  check("alice's other session is unaffected", otherSession.status === 200);
+
+  const carol = await register('carol');
+  const carol2 = await call('POST', '/auth/login', {
+    json: { email: carol.email, password: carol.password },
+  });
+  const all = await call('POST', '/auth/logout-all', { token: carol.token });
+  check('logout-all -> 204', all.status === 204);
+  const [c1, c2, a1] = await Promise.all([
+    call('GET', '/me', { token: carol.token }),
+    call('GET', '/me', { token: carol2.body?.accessToken }),
+    call('GET', '/me', { token: alice.token }),
+  ]);
+  check(
+    "logout-all ends both of carol's sessions, not alice's",
+    c1.status === 401 && c2.status === 401 && a1.status === 200,
+    `${c1.status}/${c2.status}/${a1.status}`,
+  );
 }
 
 section('3. Upload validation and asynchronous ingestion');
@@ -581,6 +654,29 @@ if (LARGE_PAGES > 0) {
     );
     await call('DELETE', `/documents/${upload.body.id}`, { token: alice.token });
   }
+}
+
+// Last on purpose: it uses up this client's login budget (login-ip policy) for the rest of the window.
+if (process.env.DOCULENS_E2E_SKIP_RATE_LIMIT !== 'true') {
+  section('8. Rate limiting through the proxy');
+  let limited = null;
+  let attempts = 0;
+  for (; attempts < 60 && !limited; attempts++) {
+    const response = await call('POST', '/auth/login', {
+      json: { email: `limit-${attempts}-${RUN}@example.test`, password: 'Wrong-Password-123' },
+      headers: { 'X-Forwarded-For': `203.0.113.${attempts % 250}` }, // spoofed: must not help
+    });
+    if (response.status === 429) limited = response;
+  }
+  check(
+    `login attempts are limited per client IP despite spoofed X-Forwarded-For (429 after ${attempts})`,
+    limited !== null && limited.body?.code === 'RATE_LIMITED',
+  );
+  check(
+    '429 carries Retry-After',
+    /^[1-9][0-9]*$/.test(limited?.headers.get('retry-after') ?? ''),
+    `Retry-After: ${limited?.headers.get('retry-after')}`,
+  );
 }
 
 console.log(`\n${passed} passed, ${failures.length} failed`);

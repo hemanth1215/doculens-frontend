@@ -209,6 +209,10 @@ a {
   gap: var(--space-3);
 }
 
+.app-signout-error {
+  margin: var(--space-3) var(--space-6) 0;
+}
+
 .app-user__name {
   font-size: 0.9rem;
   color: var(--color-text-muted);

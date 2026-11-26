@@ -24,22 +24,25 @@ export class ChatStreamService {
   ask(conversationId: string, question: string): Observable<StreamEvent> {
     return new Observable<StreamEvent>((subscriber) => {
       const controller = new AbortController();
-      const token = this.auth.accessToken();
+      const post = (token: string | null) =>
+        fetch(`${this.apiBase}/conversations/${encodeURIComponent(conversationId)}/messages`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Accept: 'text/event-stream, application/problem+json',
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
+          body: JSON.stringify({ question }),
+          signal: controller.signal,
+        });
 
       (async () => {
-        const response = await fetch(
-          `${this.apiBase}/conversations/${encodeURIComponent(conversationId)}/messages`,
-          {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              Accept: 'text/event-stream, application/problem+json',
-              ...(token ? { Authorization: `Bearer ${token}` } : {}),
-            },
-            body: JSON.stringify({ question }),
-            signal: controller.signal,
-          },
-        );
+        // fetch bypasses the HTTP interceptors, so token refresh is handled here: refresh an expired token first,
+        // and retry once with a refreshed token if the API still answers 401.
+        let response = await post(await this.auth.validAccessToken());
+        if (response.status === 401 && this.auth.isAuthenticated()) {
+          response = await post(await this.auth.refreshAccessToken());
+        }
 
         if (!response.ok || !response.body) {
           if (response.status === 401) {

@@ -1,4 +1,4 @@
-import { Component, inject } from '@angular/core';
+import { Component, inject, signal } from '@angular/core';
 import { RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
 import { AuthService } from '../core/auth/auth.service';
 
@@ -26,11 +26,30 @@ import { AuthService } from '../core/auth/auth.service';
         <span class="app-user__name" [title]="auth.user()?.email ?? ''">{{
           auth.user()?.displayName
         }}</span>
-        <button type="button" class="btn btn--ghost btn--small" (click)="auth.logout()">
+        <button
+          type="button"
+          class="btn btn--ghost btn--small"
+          [disabled]="busy()"
+          (click)="signOut()"
+        >
           Sign out
+        </button>
+        <button
+          type="button"
+          class="btn btn--ghost btn--small"
+          title="Sign out on every browser and device"
+          [disabled]="busy()"
+          (click)="signOutEverywhere()"
+        >
+          Sign out everywhere
         </button>
       </div>
     </header>
+    @if (signOutError()) {
+      <p class="alert alert--error app-signout-error" role="alert">
+        Could not sign out your other devices. Check your connection and try again.
+      </p>
+    }
     <main id="main" class="app-main" tabindex="-1">
       <router-outlet />
     </main>
@@ -38,4 +57,24 @@ import { AuthService } from '../core/auth/auth.service';
 })
 export class Shell {
   protected readonly auth = inject(AuthService);
+  protected readonly busy = signal(false);
+  protected readonly signOutError = signal(false);
+
+  protected async signOut(): Promise<void> {
+    this.busy.set(true);
+    await this.auth.logout();
+    this.busy.set(false);
+  }
+
+  protected async signOutEverywhere(): Promise<void> {
+    this.busy.set(true);
+    this.signOutError.set(false);
+    try {
+      await this.auth.logoutEverywhere();
+    } catch {
+      this.signOutError.set(true);
+    } finally {
+      this.busy.set(false);
+    }
+  }
 }

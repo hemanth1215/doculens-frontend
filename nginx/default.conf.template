@@ -24,7 +24,9 @@ server {
         proxy_http_version 1.1;
         proxy_set_header Connection "";
         proxy_set_header Host $host;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        # nginx is the edge here: replace any client-supplied X-Forwarded-For so the backend sees the real peer
+        # address (it is used for per-IP rate limits). Behind another proxy, use $proxy_add_x_forwarded_for instead.
+        proxy_set_header X-Forwarded-For $remote_addr;
         proxy_set_header X-Forwarded-Proto $scheme;
         proxy_set_header X-Forwarded-Host $host;
         # SSE: pass tokens through immediately. Uploads: stream the body instead of buffering 100 MB in the proxy.
